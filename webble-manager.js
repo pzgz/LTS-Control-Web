@@ -10,7 +10,7 @@
   const state = {
     device: null, server: null, char: null,
     connected: false,
-    name: null, fw: null,
+    name: null, fw: null, fwBuild: null,
     run: false, progress: null, remaining: null,
     isError: false, errMsg: null,
     statusCode: null, statusText: null,
@@ -207,6 +207,7 @@
     try { if (state.char) state.char.removeEventListener('characteristicvaluechanged', onNotify); } catch(_) {}
     state.server = null; state.char = null; state.connected = false;
     state.spools = null;
+    state.fwBuild = null;
 
     const now = Date.now();
     const elapsed = state.lastConnectedAt ? (now - state.lastConnectedAt) : Infinity;
@@ -301,6 +302,7 @@
 
         if (typeof d.TEMP === 'number') avgTempPush(d.TEMP);
         if ('FW' in d) state.fw = d.FW || state.fw;
+        if ('FW_B' in d) state.fwBuild = d.FW_B || null;
 
         if (Object.prototype.hasOwnProperty.call(d, 'VAR')) {
           state.didReceiveBoardVariant = true;
@@ -344,7 +346,8 @@
         if ('WIFI_RESULT' in d) state.wifiLastResult = (typeof d.WIFI_RESULT === 'boolean') ? d.WIFI_RESULT : bool(d.WIFI_RESULT);
         if ('WIFI_CONN_RESULT' in d) state.wifiConnectionResult = (typeof d.WIFI_CONN_RESULT === 'boolean') ? d.WIFI_CONN_RESULT : bool(d.WIFI_CONN_RESULT);
 
-        if ('OTA_OK' in d) {
+        // Regular status packets carry "OTA_OK":null; only a real true/false is a result.
+        if ('OTA_OK' in d && d.OTA_OK !== null) {
           // OTA result from firmware (true/false). Keep null until we receive a value.
           state.otaSuccess = (typeof d.OTA_OK === 'boolean') ? d.OTA_OK : bool(d.OTA_OK);
           state.otaInProgress = false;
@@ -436,6 +439,16 @@
       emit('state', { ...state });
       emit('status', { ...state });
       return sendCmd('OTA');
+    },
+    // Custom firmware only: the board downloads the .bin from `url` (http:// or https://) instead of the official server.
+    otaUpdateFrom: (url) => {
+      if (!state.char || !state.connected) return Promise.reject(new Error('Not connected'));
+      state.otaSuccess = null;
+      state.otaInProgress = true;
+      state.isUpdating = true;
+      emit('state', { ...state });
+      emit('status', { ...state });
+      return writePacket({ CMD: 'OTA', URL: String(url) });
     },
     triggerOTAUpdate: () => window.webble.otaUpdate(),
     wifiScan: () => { state.isScanningForSSIDs = true; emit('state', { ...state }); return sendCmd('WIFI_SCAN'); },

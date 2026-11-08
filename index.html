@@ -414,6 +414,17 @@
         </div>
 
       </section>
+
+      <!-- Custom firmware: shown only when the board reports a custom build (FW_B) -->
+      <section id="customFwSection" class="section-base custom-fw" hidden>
+        <hr class="section-divider" style="margin:12px 0;">
+        <h3 class="custom-fw-title">Update from URL</h3>
+        <p class="wifi-desc">Board runs <b id="customFwBuild"></b>. The board downloads a firmware .bin over Wi‑Fi from this address (http:// or https://). The regular update would replace this build with the official firmware.</p>
+        <input id="customFwUrl" class="form-control custom-fw-url" type="url" inputmode="url" spellcheck="false" autocomplete="off"
+               placeholder="http://10.0.0.98:8765/firmware.bin" />
+        <button id="customFwBtn" class="lts-btn" type="button" style="margin-top:10px; width:100%;">Install</button>
+        <p id="customFwMsg" class="spool-msg custom-fw-msg">&nbsp;</p>
+      </section>
     </div>
   </div>
 

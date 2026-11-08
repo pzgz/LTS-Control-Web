@@ -402,6 +402,7 @@
 
   // Info FW update button (rendered inline inside #infoFw)
   let infoFwUpdateBtn = null;
+  let infoFwCustomBtn = null;
   let infoFwLastRenderKey = null;
 
   // Info Wi-Fi action button (rendered inline inside #infoWifi)
@@ -648,9 +649,14 @@
       const isLocalPending = now < otaLocalPendingUntil;
       const isUpdating = isUpdatingFromBoard || isLocalPending;
 
+      // Custom builds report FW_B. The official update would overwrite them, so for those the row
+      // offers "Update from URL" (in the Wi-Fi modal) instead of the official update button.
+      const customBuild = st?.fwBuild ? String(st.fwBuild).trim() : '';
+
       const key = [
         cur || '',
         latest || '',
+        customBuild,
         connEpoch,
         isConn ? '1' : '0',
         updateAvailable ? '1' : '0',
@@ -748,7 +754,38 @@
       if (key !== infoFwLastRenderKey) {
         infoFwLastRenderKey = key;
 
-        if (!cur) {
+        if (customBuild && isConn) {
+          const { row, left } = ensureRow();
+          left.textContent = isUpdating ? `${customBuild} (updating…)` : `${customBuild} (custom)`;
+          row.appendChild(left);
+          if (!infoFwCustomBtn) {
+            infoFwCustomBtn = document.createElement('button');
+            infoFwCustomBtn.type = 'button';
+            try {
+              const calBtn = document.getElementById('servoCalBtn');
+              if (calBtn && calBtn.className) infoFwCustomBtn.className = calBtn.className;
+            } catch(_) {}
+            infoFwCustomBtn.textContent = 'Update';
+            infoFwCustomBtn.style.pointerEvents = 'auto';
+            infoFwCustomBtn.style.cursor = 'pointer';
+            infoFwCustomBtn.style.position = 'relative';
+            infoFwCustomBtn.style.zIndex = '5';
+            infoFwCustomBtn.addEventListener('click', (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              try {
+                if (wifiModalBackdrop) wifiModalBackdrop.classList.add('show');
+                refreshWifiConnectEnabled();
+                renderCustomFw(window.webble.getState());
+                const u = document.getElementById('customFwUrl');
+                if (u) u.focus();
+              } catch(_) {}
+            });
+          }
+          infoFwCustomBtn.disabled = isUpdating;
+          row.appendChild(infoFwCustomBtn);
+          infoFw.appendChild(row);
+        } else if (!cur) {
           // While connected but firmware has not been reported yet, keep a stable placeholder.
           // Use the same injected row structure as other states (avoids Safari layout quirks with text nodes).
           const { row, left } = ensureRow();
@@ -877,7 +914,73 @@
     try { scheduleInfoCardHeightSync(); } catch(_) {}
   }
 
+  // ---- Custom firmware: install a .bin from a URL (only offered when the board reports FW_B) ----
+  const CUSTOM_FW_URL_KEY = 'lts.customFwUrl';
+  let customFwPhase = 'idle'; // 'idle' | 'sent' | 'updating' | 'failed' | 'done'
+
+  function renderCustomFw(st){
+    const sec = document.getElementById('customFwSection');
+    if (!sec) return;
+    const build = st?.fwBuild ? String(st.fwBuild) : '';
+    const isConn = window.webble?.getState?.().connected === true;
+    sec.hidden = !build;
+    if (!build) return;
+    const btn = document.getElementById('customFwBtn');
+    const msg = document.getElementById('customFwMsg');
+    const cur = document.getElementById('customFwBuild');
+    if (cur) cur.textContent = build;
+    const isU = String(st?.statusCode || '').trim().toUpperCase() === 'U';
+    const ok = (typeof st?.otaSuccess === 'boolean') ? st.otaSuccess : null;
+    if (customFwPhase === 'sent' && isU) customFwPhase = 'updating';
+    if ((customFwPhase === 'sent' || customFwPhase === 'updating') && ok === false) customFwPhase = 'failed';
+    if ((customFwPhase === 'sent' || customFwPhase === 'updating') && ok === true) customFwPhase = 'done';
+    if (customFwPhase === 'updating' && !isU && ok === null) customFwPhase = 'failed';
+    const wifiOk = st?.wifiConnected === true;
+    if (btn) btn.disabled = !isConn || !wifiOk || customFwPhase === 'sent' || customFwPhase === 'updating';
+    if (msg) {
+      let t = '';
+      if (!wifiOk) t = 'The board needs Wi‑Fi first (connect above).';
+      else if (customFwPhase === 'sent') t = 'Sent, waiting for the board…';
+      else if (customFwPhase === 'updating') t = 'Downloading and writing… keep the board powered (about 30 s).';
+      else if (customFwPhase === 'failed') t = 'Update failed: the board could not download or verify the file. Check the URL in a browser on the same network.';
+      else if (customFwPhase === 'done') t = 'Installed. The board restarts now.';
+      msg.textContent = t || '\u00A0';
+      msg.classList.toggle('is-error', customFwPhase === 'failed');
+    }
+  }
+
+  function bindCustomFw(){
+    const url = document.getElementById('customFwUrl');
+    const btn = document.getElementById('customFwBtn');
+    if (!url || !btn) return;
+    try { const v = localStorage.getItem(CUSTOM_FW_URL_KEY); if (v) url.value = v; } catch(_) {}
+    btn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      const v = String(url.value || '').trim();
+      const msg = document.getElementById('customFwMsg');
+      if (!/^https?:\/\/[^\s]+$/i.test(v) || v.length >= 200) {
+        if (msg) { msg.textContent = 'Enter a full http:// or https:// address of a .bin file.'; msg.classList.add('is-error'); }
+        return;
+      }
+      try { localStorage.setItem(CUSTOM_FW_URL_KEY, v); } catch(_) {}
+      customFwPhase = 'sent';
+      otaUserInitiatedThisConnection = true;
+      otaLocalPendingUntil = Date.now() + 15000;
+      renderCustomFw(window.webble.getState());
+      try {
+        await window.webble.otaUpdateFrom(v);
+      } catch (e) {
+        console.error(e);
+        customFwPhase = 'failed';
+        otaLocalPendingUntil = 0;
+        renderCustomFw(window.webble.getState());
+      }
+    });
+    window.webble.on('state', (s) => { if (s && s.connected === false) customFwPhase = 'idle'; try { renderCustomFw(s); } catch(_) {} });
+  }
+
   function bindStatusUI(){
+    try { bindCustomFw(); } catch (e) { console.error(e); }
     // Modal closers
     if (wifiModalClose) wifiModalClose.addEventListener('click', closeWifiModal);
     if (wifiModalBackdrop) {
@@ -1156,6 +1259,7 @@
 
       updateStatusPills(s);
       updateInfoMeta(s);
+      try { renderCustomFw(s); } catch(_) {}
 
       try {
         const isConn = window.webble.getState().connected === true;

@@ -1518,3 +1518,9 @@ input[type="checkbox"] {
 @media (prefers-color-scheme: dark) {
   .spool-num, .spool-text, .spool-select { background: rgba(255,255,255,0.08); color: rgb(var(--text)); border-color: rgba(255,255,255,0.18); }
 }
+
+/* Custom firmware (Update from URL) */
+.custom-fw-title { font-size: 1rem; margin: 0 0 6px; }
+.custom-fw-url { width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; padding: 0.45rem 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+.custom-fw-msg { margin: 8px 0 0; }
+.custom-fw-msg.is-error { color: #dc2626; }
