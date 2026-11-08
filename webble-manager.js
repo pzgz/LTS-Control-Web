@@ -94,6 +94,7 @@
   async function connect(){
     if(!('bluetooth' in navigator)) throw new Error('WebBluetooth wird nicht unterstützt.');
     if (state.__connecting) return; state.__connecting = true;
+    state.userDisconnect = false;
     let device;
     try {
       try {
@@ -213,7 +214,7 @@
     const now = Date.now();
     const elapsed = state.lastConnectedAt ? (now - state.lastConnectedAt) : Infinity;
 
-    if (elapsed < 2000 && state.quickRetryCount < 2) {
+    if (!state.userDisconnect && elapsed < 2000 && state.quickRetryCount < 2) {
       state.quickRetryCount++;
       (async () => {
         const ok = await silentReconnect(2);
@@ -222,6 +223,7 @@
           state.doneHoldUntil = null;
           emit('disconnected', {});
           emit('state', {...state});
+          scheduleAutoReconnect();
         }
       })();
       return;
@@ -231,6 +233,35 @@
     state.doneHoldUntil = null;
     emit('disconnected', {});
     emit('state', {...state});
+    scheduleAutoReconnect();
+  }
+
+  // Unexpected disconnects (link timeout, board restart after an update) reconnect by themselves:
+  // retries with back-off for up to 3 minutes. A disconnect the user asked for does not.
+  let autoReconnectTimer = 0;
+  let autoReconnectActive = false;
+  function scheduleAutoReconnect(){
+    if (autoReconnectActive || state.userDisconnect || !state.device || !state.device.gatt) return;
+    autoReconnectActive = true;
+    state.reconnecting = true;
+    emit('state', {...state});
+    const delays = [600, 1000, 2000, 3000, 5000];
+    const startedAt = Date.now();
+    let attempt = 0;
+    const stop = () => {
+      autoReconnectActive = false;
+      clearTimeout(autoReconnectTimer);
+      state.reconnecting = false;
+      emit('state', {...state});
+    };
+    const tick = async () => {
+      if (state.userDisconnect || state.connected || state.__connecting) { stop(); return; }
+      if (Date.now() - startedAt > 180000) { emit('log', { dir:'err', error:'auto-reconnect gave up' }); stop(); return; }
+      const ok = await silentReconnect(1);
+      if (ok) { emit('log', { dir:'info', msg:`auto-reconnected after ${attempt + 1} attempt(s)` }); stop(); return; }
+      autoReconnectTimer = setTimeout(tick, delays[Math.min(attempt++, delays.length - 1)]);
+    };
+    autoReconnectTimer = setTimeout(tick, delays[0]);
   }
 
   function onNotify(ev){
@@ -389,7 +420,8 @@
           const firstTime = !state.hasSpoolTools;
           state.hasSpoolTools = true;
           if (!isEditing('SV_MMD') && !isHeld('SV_MMD')) state.servoMmPerDeg = d.SV_MMD;
-          if (firstTime && state.spools == null) requestSpoolsSoon();
+          // Also after a reconnect (the list is cleared on disconnect); requestSpoolsSoon() de-duplicates.
+          if (state.spools == null) requestSpoolsSoon(firstTime ? 800 : 400);
         }
         if (typeof d.SV_W === 'number' && !isEditing('SV_W') && !isHeld('SV_W')) state.spoolWidthMm = d.SV_W;
         if (typeof d.SV_DW === 'number' && !isEditing('SV_DW') && !isHeld('SV_DW')) state.guideDwell = d.SV_DW;
@@ -420,7 +452,7 @@
       lastResult: state.wifiLastResult,
       connResult: state.wifiConnectionResult,
     }),
-    connect, disconnect: () => { if(state.device?.gatt?.connected) state.device.gatt.disconnect(); },
+    connect, disconnect: () => { state.userDisconnect = true; if(state.device?.gatt?.connected) state.device.gatt.disconnect(); },
     beginEdit: (key) => { beginEdit(key); },
     endEdit:   (key) => { endEdit(key); },
     start: () => sendCmd('START'),

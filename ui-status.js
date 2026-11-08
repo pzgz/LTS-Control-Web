@@ -525,7 +525,7 @@
     try {
       const isConn = !!(s && s.connected);
 
-      if (pillConnSub) pillConnSub.textContent = isConn ? 'Connected' : 'Disconnected';
+      if (pillConnSub) pillConnSub.textContent = isConn ? 'Connected' : (s && s.reconnecting ? 'Reconnecting…' : 'Disconnected');
       if (pillConnIcon) {
         pillConnIcon.src = isConn
           ? 'antenna.png'
@@ -976,7 +976,13 @@
         renderCustomFw(window.webble.getState());
       }
     });
-    window.webble.on('state', (s) => { if (s && s.connected === false) customFwPhase = 'idle'; try { renderCustomFw(s); } catch(_) {} });
+    window.webble.on('state', (s) => {
+      if (s && s.connected === false) {
+        customFwPhase = 'idle';
+        try { updateStatusPills(s); } catch(_) {}  // shows "Reconnecting…" while auto-reconnect runs
+      }
+      try { renderCustomFw(s); } catch(_) {}
+    });
   }
 
   function bindStatusUI(){
