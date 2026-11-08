@@ -238,27 +238,49 @@
 
   // Unexpected disconnects (link timeout, board restart after an update) reconnect by themselves:
   // retries with back-off for up to 3 minutes. A disconnect the user asked for does not.
+  // Chromium on macOS forgets a device it has not scanned for a while, and gatt.connect() then fails at
+  // once without even trying. If the browser offers watchAdvertisements() (behind a flag in Chrome), the
+  // page waits for the board's next advertisement; otherwise it stops and the Connect button is needed.
   let autoReconnectTimer = 0;
   let autoReconnectActive = false;
   function scheduleAutoReconnect(){
     if (autoReconnectActive || state.userDisconnect || !state.device || !state.device.gatt) return;
+    const device = state.device;
     autoReconnectActive = true;
     state.reconnecting = true;
     emit('state', {...state});
     const delays = [600, 1000, 2000, 3000, 5000];
     const startedAt = Date.now();
-    let attempt = 0;
-    const stop = () => {
+    let attempt = 0, fastFails = 0, watching = false;
+    const stop = (why) => {
       autoReconnectActive = false;
       clearTimeout(autoReconnectTimer);
+      try { device.removeEventListener('advertisementreceived', onAdv); } catch(_) {}
+      try { if (watching && device.unwatchAdvertisements) device.unwatchAdvertisements(); } catch(_) {}
       state.reconnecting = false;
+      if (why) emit('log', { dir:'err', error:`auto-reconnect stopped: ${why}` });
       emit('state', {...state});
     };
+    const onAdv = () => { clearTimeout(autoReconnectTimer); autoReconnectTimer = setTimeout(tick, 50); };
     const tick = async () => {
       if (state.userDisconnect || state.connected || state.__connecting) { stop(); return; }
-      if (Date.now() - startedAt > 180000) { emit('log', { dir:'err', error:'auto-reconnect gave up' }); stop(); return; }
+      if (Date.now() - startedAt > 180000) { stop('gave up after 3 minutes'); return; }
+      const t0 = Date.now();
       const ok = await silentReconnect(1);
       if (ok) { emit('log', { dir:'info', msg:`auto-reconnected after ${attempt + 1} attempt(s)` }); stop(); return; }
+      fastFails = (Date.now() - t0 < 400) ? fastFails + 1 : 0;
+      if (fastFails >= 3 && !watching) {
+        if (typeof device.watchAdvertisements === 'function') {
+          try {
+            await device.watchAdvertisements();
+            device.addEventListener('advertisementreceived', onAdv);
+            watching = true;
+            emit('log', { dir:'info', msg:'waiting for the board to advertise' });
+          } catch (e) { stop('browser cannot reconnect without the device chooser'); return; }
+        } else {
+          stop('browser cannot reconnect without the device chooser'); return;
+        }
+      }
       autoReconnectTimer = setTimeout(tick, delays[Math.min(attempt++, delays.length - 1)]);
     };
     autoReconnectTimer = setTimeout(tick, delays[0]);
