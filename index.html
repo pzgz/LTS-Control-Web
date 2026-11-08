@@ -233,6 +233,67 @@
                 </div>
               </div>
 
+              <!-- Spool tools: only shown when the board firmware supports them (SV_MMD in status) -->
+              <div id="spoolTools" hidden>
+                <div class="form-grid" style="margin-top:8px;">
+                  <label for="spoolSelect" class="form-label">Spool Preset:</label>
+                  <select id="spoolSelect" class="form-control spool-select">
+                    <option value="-1">None</option>
+                  </select>
+                </div>
+
+                <div class="form-grid" style="margin-top:8px;">
+                  <label for="spoolWidth" class="form-label">Inner Width:</label>
+                  <div class="form-control spool-inline">
+                    <input id="spoolWidth" class="spool-num" type="number" min="0" max="300" step="0.5" inputmode="decimal" placeholder="0">
+                    <span class="spool-unit">mm</span>
+                  </div>
+                </div>
+
+                <div class="form-grid" style="margin-top:8px;">
+                  <label for="spoolName" class="form-label">Save Preset:</label>
+                  <div class="form-control spool-inline">
+                    <input id="spoolName" class="spool-text" type="text" maxlength="15" placeholder="Name" autocomplete="off">
+                    <button id="spoolSaveBtn" class="mini-btn compact" type="button">Save</button>
+                    <button id="spoolDelBtn" class="mini-btn compact" type="button" title="Delete the selected preset">Delete</button>
+                  </div>
+                </div>
+
+                <div class="form-grid" style="margin-top:8px;">
+                  <label for="newSpoolWidth" class="form-label">Ends for Width:</label>
+                  <div class="form-control spool-inline">
+                    <input id="newSpoolWidth" class="spool-num" type="number" min="5" max="300" step="0.5" inputmode="decimal" placeholder="mm">
+                    <span class="spool-unit">mm</span>
+                    <button id="newSpoolWidthBtn" class="mini-btn compact" type="button">Apply</button>
+                  </div>
+                </div>
+                <div class="form-grid" style="margin-top:8px;">
+                  <label for="spoolAnchor" class="form-label">Spool Sits:</label>
+                  <select id="spoolAnchor" class="form-control spool-select">
+                    <option value="C">Centered</option>
+                    <option value="L">Against Left</option>
+                    <option value="R">Against Right</option>
+                  </select>
+                </div>
+
+                <div class="form-grid" style="margin-top:8px;">
+                  <label for="guideTravel" class="form-label">Measured Travel:</label>
+                  <div class="form-control spool-inline">
+                    <input id="guideTravel" class="spool-num" type="number" min="5" max="200" step="0.5" inputmode="decimal" placeholder="mm">
+                    <span class="spool-unit">mm</span>
+                    <button id="guideTravelBtn" class="mini-btn compact" type="button">Calibrate</button>
+                  </div>
+                </div>
+                <div class="form-grid" style="margin-top:6px;">
+                  <div></div>
+                  <div id="spoolInfo" class="form-control spool-info">–</div>
+                </div>
+                <div class="form-grid">
+                  <div></div>
+                  <div id="spoolMsg" class="form-control spool-msg" role="status" aria-live="polite"></div>
+                </div>
+              </div>
+
               <div class="form-grid" style="margin-top:8px;">
                 <label for="servoHomeSetting" class="form-label">Home Position:</label>
                 <select id="servoHomeSetting" class="form-control" style="width:min(110px, 100%); border:1px solid #d1d5db; color:#000;">

@@ -1501,3 +1501,20 @@ input[type="checkbox"] {
     background: rgba(28,28,30,0.5);
   }
 }
+
+/* --- Spool tools (pzgz fork) --- */
+.spool-inline { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%; }
+.spool-num, .spool-text, .spool-select {
+  height: 26px; border: 1px solid #d1d5db; border-radius: 8px; padding: 0 8px;
+  font: inherit; font-size: 0.95rem; color: #000; background: #fff;
+}
+.spool-num { width: 64px; }
+.spool-text { width: 92px; }
+.spool-select { width: min(190px, 100%); }
+.spool-unit { opacity: 0.7; font-size: 0.9rem; }
+.spool-info { font-size: 0.85rem; opacity: 0.75; font-variant-numeric: tabular-nums; }
+.spool-msg { font-size: 0.85rem; min-height: 1.1em; }
+.spool-msg.is-error { color: #dc2626; }
+@media (prefers-color-scheme: dark) {
+  .spool-num, .spool-text, .spool-select { background: rgba(255,255,255,0.08); color: rgb(var(--text)); border-color: rgba(255,255,255,0.18); }
+}

@@ -165,6 +165,8 @@
       if (servoStepMinus) servoStepMinus.disabled = !on;
       if (servoStepPlus) servoStepPlus.disabled = !on;
       if (servoHomeSetting) servoHomeSetting.disabled = !on;
+      ['spoolSelect','spoolWidth','spoolName','spoolSaveBtn','spoolDelBtn','newSpoolWidth','newSpoolWidthBtn','spoolAnchor','guideTravel','guideTravelBtn']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.disabled = !on; });
     }
 
     // -------------------- Bind settings controls --------------------
@@ -382,6 +384,186 @@
     // Initialize
     setSide('L');
 
+    // -------------------- Spool tools (pzgz firmware) --------------------
+    // Presets (name + end stops + inner width) live on the board. "Ends for Width" derives new end
+    // stops for another spool from the current calibrated one; "Measured Travel" calibrates how far
+    // the guide moves per servo degree, which makes the step distance exact.
+    const spoolTools     = document.getElementById('spoolTools');
+    const spoolSelect    = document.getElementById('spoolSelect');
+    const spoolWidth     = document.getElementById('spoolWidth');
+    const spoolName      = document.getElementById('spoolName');
+    const spoolSaveBtn   = document.getElementById('spoolSaveBtn');
+    const spoolDelBtn    = document.getElementById('spoolDelBtn');
+    const newSpoolWidth  = document.getElementById('newSpoolWidth');
+    const newSpoolWidthBtn = document.getElementById('newSpoolWidthBtn');
+    const spoolAnchor    = document.getElementById('spoolAnchor');
+    const guideTravel    = document.getElementById('guideTravel');
+    const guideTravelBtn = document.getElementById('guideTravelBtn');
+    const spoolInfo      = document.getElementById('spoolInfo');
+    const spoolMsg       = document.getElementById('spoolMsg');
+
+    let spoolMsgTimer = null;
+    function showSpoolMsg(text, isError){
+      if (!spoolMsg) return;
+      spoolMsg.textContent = text || '';
+      spoolMsg.classList.toggle('is-error', !!isError);
+      clearTimeout(spoolMsgTimer);
+      if (text) spoolMsgTimer = setTimeout(() => { spoolMsg.textContent = ''; }, 6000);
+    }
+    function cur(){ try { return window.webble.getState() || {}; } catch(_) { return {}; } }
+    function fmt(n, d){ return Number.isFinite(n) ? n.toFixed(d) : '–'; }
+
+    try {
+      const a = localStorage.getItem('lts.spoolAnchor');
+      if (spoolAnchor && (a === 'C' || a === 'L' || a === 'R')) spoolAnchor.value = a;
+    } catch(_) {}
+    if (spoolAnchor) spoolAnchor.addEventListener('change', () => {
+      try { localStorage.setItem('lts.spoolAnchor', spoolAnchor.value); } catch(_) {}
+    });
+
+    function renderSpoolList(st){
+      if (!spoolSelect || isUIEditing('SPOOL')) return;
+      const list = Array.isArray(st.spools) ? st.spools : [];
+      const want = String(st.activeSpool ?? -1);
+      const sig = JSON.stringify(list) + '|' + want;
+      if (spoolSelect.dataset.sig === sig) return;
+      spoolSelect.dataset.sig = sig;
+      spoolSelect.innerHTML = '';
+      const none = document.createElement('option');
+      none.value = '-1'; none.textContent = 'None';
+      spoolSelect.appendChild(none);
+      for (const p of list) {
+        const o = document.createElement('option');
+        o.value = String(p.i);
+        o.textContent = p.w > 0 ? `${p.name} (${+p.w.toFixed(1)} mm)` : p.name;
+        spoolSelect.appendChild(o);
+      }
+      spoolSelect.value = list.some(p => String(p.i) === want) ? want : '-1';
+    }
+
+    function renderSpoolInfo(st){
+      if (!spoolInfo) return;
+      const mmd = Number(st.servoMmPerDeg);
+      const pitch = Number(st.servoStepMm);
+      const L = Number(st.servoAngleL), R = Number(st.servoAngleR);
+      if (!(mmd > 0) || !(pitch > 0)) { spoolInfo.textContent = '–'; return; }
+      const travel = (L - R) * mmd;
+      const parts = [`${fmt(mmd, 4)} mm/°`, `${fmt(pitch / mmd, 2)}° per turn`];
+      if (travel > 0) parts.push(`guide travel ${fmt(travel, 1)} mm`, `≈ ${fmt(travel / pitch, 1)} turns/layer`);
+      spoolInfo.textContent = parts.join(' · ');
+    }
+
+    function renderSpoolTools(st){
+      if (!spoolTools) return;
+      spoolTools.hidden = !st.hasSpoolTools;
+      if (!st.hasSpoolTools) return;
+      renderSpoolList(st);
+      if (spoolWidth && document.activeElement !== spoolWidth && !isUIEditing('SV_W')) {
+        const w = Number(st.spoolWidthMm);
+        spoolWidth.value = w > 0 ? String(w) : '';
+      }
+      if (spoolName && document.activeElement !== spoolName && !spoolName.dataset.touched) {
+        const p = (st.spools || []).find(x => x.i === st.activeSpool);
+        spoolName.value = p ? p.name : '';
+      }
+      renderSpoolInfo(st);
+    }
+
+    if (spoolSelect) {
+      spoolSelect.addEventListener('focusin', () => beginUI('SPOOL'));
+      spoolSelect.addEventListener('blur', () => { if (isUIEditing('SPOOL')) endUI('SPOOL'); });
+      spoolSelect.addEventListener('change', () => {
+        const i = Number(spoolSelect.value) | 0;
+        try {
+          runOrQueue('SPOOL', () => window.webble.selectSpool(i));
+          if (spoolName) { delete spoolName.dataset.touched; }
+          if (i >= 0) showSpoolMsg('Preset applied. The guide moves to its home end.');
+        } finally { endUI('SPOOL'); }
+      });
+    }
+
+    if (spoolWidth) {
+      spoolWidth.addEventListener('focusin', () => beginUI('SV_W'));
+      spoolWidth.addEventListener('change', () => {
+        const w = Number(spoolWidth.value);
+        try {
+          if (!(w >= 0 && w <= 300)) { showSpoolMsg('Enter a width between 0 and 300 mm.', true); return; }
+          runOrQueue('SV_W', () => window.webble.setSpoolWidth(w));
+        } finally { endUI('SV_W'); }
+      });
+      spoolWidth.addEventListener('blur', () => { if (isUIEditing('SV_W')) endUI('SV_W'); });
+    }
+
+    if (spoolName) spoolName.addEventListener('input', () => { spoolName.dataset.touched = '1'; });
+
+    if (spoolSaveBtn) spoolSaveBtn.addEventListener('click', async () => {
+      const st = cur();
+      const name = (spoolName?.value || '').trim();
+      if (!name) { showSpoolMsg('Enter a name for the preset.', true); return; }
+      if (!st.connected) { showSpoolMsg('Connect to the Respooler first.', true); return; }
+      const list = Array.isArray(st.spools) ? st.spools : [];
+      const same = list.find(p => p.name === name);
+      if (!same && list.length >= 6) { showSpoolMsg('All 6 slots are used. Delete a preset first.', true); return; }
+      try {
+        await window.webble.saveSpool(name, same ? same.i : -1);
+        if (spoolName) delete spoolName.dataset.touched;
+        showSpoolMsg(same ? `Updated "${name}".` : `Saved "${name}".`);
+      } catch (e) { showSpoolMsg('Saving failed: ' + (e?.message || e), true); }
+    });
+
+    if (spoolDelBtn) spoolDelBtn.addEventListener('click', async () => {
+      const st = cur();
+      const p = (st.spools || []).find(x => x.i === st.activeSpool);
+      if (!p) { showSpoolMsg('Select the preset to delete first.', true); return; }
+      if (!window.confirm(`Delete preset "${p.name}"?`)) return;
+      try { await window.webble.deleteSpool(p.i); showSpoolMsg(`Deleted "${p.name}".`); }
+      catch (e) { showSpoolMsg('Delete failed: ' + (e?.message || e), true); }
+    });
+
+    if (newSpoolWidthBtn) newSpoolWidthBtn.addEventListener('click', async () => {
+      const st = cur();
+      const W = Number(st.spoolWidthMm), mmd = Number(st.servoMmPerDeg);
+      const L = Number(st.servoAngleL), R = Number(st.servoAngleR);
+      const W2 = Number(newSpoolWidth?.value);
+      if (!(W > 0)) { showSpoolMsg('First enter the inner width of the spool the current ends were calibrated on.', true); return; }
+      if (!(mmd > 0) || !(L > R)) { showSpoolMsg('Calibrate the end positions first (left angle must be larger than right).', true); return; }
+      if (!(W2 >= 5 && W2 <= 300)) { showSpoolMsg('Enter the new inner width in mm.', true); return; }
+      // Clearance between guide travel and inner width stays the same for any spool.
+      const clearance = W - (L - R) * mmd;
+      const range = (W2 - clearance) / mmd;
+      if (!(range > 5)) { showSpoolMsg('That width is too narrow for this guide.', true); return; }
+      const anchor = spoolAnchor?.value || 'C';
+      let L2, R2;
+      if (anchor === 'L') { L2 = L; R2 = L - range; }
+      else if (anchor === 'R') { R2 = R; L2 = R + range; }
+      else { const c = (L + R) / 2; L2 = c + range / 2; R2 = c - range / 2; }
+      L2 = Math.round(L2); R2 = Math.round(R2);
+      if (L2 > 180 || R2 < 0) { showSpoolMsg(`Needs ${L2}° / ${R2}°, outside the servo range 0–180°.`, true); return; }
+      if (!st.connected) { showSpoolMsg('Connect to the Respooler first.', true); return; }
+      try {
+        await window.webble.setSpoolEnds(L2, R2, W2);
+        if (spoolName) { spoolName.value = ''; delete spoolName.dataset.touched; }
+        showSpoolMsg(`Ends set to L ${L2}° / R ${R2}°. Check them with Calibrate, then save as a preset.`);
+      } catch (e) { showSpoolMsg('Sending failed: ' + (e?.message || e), true); }
+    });
+
+    if (guideTravelBtn) guideTravelBtn.addEventListener('click', async () => {
+      const st = cur();
+      const L = Number(st.servoAngleL), R = Number(st.servoAngleR);
+      const T = Number(guideTravel?.value);
+      if (!(L > R)) { showSpoolMsg('Calibrate the end positions first.', true); return; }
+      if (!(T >= 5 && T <= 200)) { showSpoolMsg('Enter the guide travel you measured between the two ends, in mm.', true); return; }
+      const mmd = T / (L - R);
+      if (!(mmd >= 0.1 && mmd <= 1.0)) { showSpoolMsg(`${fmt(mmd, 4)} mm/° looks wrong. Check the measurement.`, true); return; }
+      if (!st.connected) { showSpoolMsg('Connect to the Respooler first.', true); return; }
+      try {
+        await window.webble.setServoMmPerDeg(mmd);
+        showSpoolMsg(`Calibrated: ${fmt(mmd, 4)} mm per degree.`);
+      } catch (e) { showSpoolMsg('Sending failed: ' + (e?.message || e), true); }
+    });
+
+    window.webble.on('spools', () => { try { renderSpoolTools(cur()); } catch(_) {} });
+
     // -------------------- Apply incoming state to SETTINGS UI --------------------
     function applySettingsFromState(s){
       const st = s || {};
@@ -456,6 +638,7 @@
       // Servo settings are only available on Respooler Pro (variant gating only — NOT connection gating).
       const isPro = isRespoolerProFromState(st || window.webble?.getState?.() || {});
       setServoSettingsEnabled(isPro);
+      try { renderSpoolTools(st); } catch(_) {}
     }
 
     window.webble.on('status', s => {

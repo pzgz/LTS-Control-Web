@@ -37,6 +37,13 @@
     servoStepMm: 1.75,
     servoHome: 'R',
 
+    // Spool tools (pzgz firmware: SV_MMD / SV_W / SPOOL / SPOOLS). hasSpoolTools stays false on stock firmware.
+    hasSpoolTools: false,
+    servoMmPerDeg: null,
+    spoolWidthMm: 0,
+    activeSpool: -1,
+    spools: null,
+
     targetWeight: 0,
     doneHoldUntil: null, DONE_HOLD_MS: 20000,
     lastConnectedAt: null,
@@ -181,9 +188,25 @@
     return false;
   }
 
+  // The spool list is only sent on request. Ask once the board has shown it supports it.
+  let spoolReqTimer = null;
+  function requestSpoolsSoon(delayMs = 800){
+    if (spoolReqTimer) return;
+    spoolReqTimer = setTimeout(async () => {
+      spoolReqTimer = null;
+      if (!state.connected || !state.hasSpoolTools) return;
+      try { await sendCmd('GET_SPOOLS'); }
+      catch (e) {
+        emit('log', { dir:'err', error:'GET_SPOOLS failed: ' + String(e) });
+        if (state.spools == null) requestSpoolsSoon(1500);
+      }
+    }, delayMs);
+  }
+
   function onDisconnected(){
     try { if (state.char) state.char.removeEventListener('characteristicvaluechanged', onNotify); } catch(_) {}
     state.server = null; state.char = null; state.connected = false;
+    state.spools = null;
 
     const now = Date.now();
     const elapsed = state.lastConnectedAt ? (now - state.lastConnectedAt) : Infinity;
@@ -216,6 +239,17 @@
     for(const ch of chunks){
       try {
         const obj = JSON.parse(ch);
+
+        if (Array.isArray(obj.SPOOLS)) {
+          state.spools = obj.SPOOLS
+            .filter(p => p && typeof p === 'object')
+            .map(p => ({ i: Number(p.I)|0, name: String(p.N ?? ''), l: Number(p.L)|0, r: Number(p.R)|0, w: Number(p.W) || 0 }));
+          if (typeof obj.SPOOL === 'number' && !isEditing('SPOOL') && !isHeld('SPOOL')) state.activeSpool = obj.SPOOL|0;
+          emit('spools', state.spools.slice());
+          emit('status', { ...state });
+          emit('state',  { ...state });
+          continue;
+        }
 
         if (Array.isArray(obj.SSID_LIST)) {
           state.isScanningForSSIDs = false;
@@ -347,6 +381,14 @@
           const n = Number(d.SV_STP);
           if (Number.isFinite(n)) state.servoStepMm = n;
         }
+        if (typeof d.SV_MMD === 'number') {
+          const firstTime = !state.hasSpoolTools;
+          state.hasSpoolTools = true;
+          if (!isEditing('SV_MMD') && !isHeld('SV_MMD')) state.servoMmPerDeg = d.SV_MMD;
+          if (firstTime && state.spools == null) requestSpoolsSoon();
+        }
+        if (typeof d.SV_W === 'number' && !isEditing('SV_W') && !isHeld('SV_W')) state.spoolWidthMm = d.SV_W;
+        if (typeof d.SPOOL === 'number' && !isEditing('SPOOL') && !isHeld('SPOOL')) state.activeSpool = d.SPOOL|0;
         if (typeof d.SV_HOME === 'string' && !isEditing('SV_HOME') && !isHeld('SV_HOME')) {
           const h = d.SV_HOME.trim().toUpperCase();
           if (h === 'R' || h === 'L') state.servoHome = h;
@@ -439,6 +481,48 @@
     setServoAngleL: (angle) => { beginEdit('SV_L'); holdKey('SV_L', 400); const a = Math.max(0, Math.min(180, Number(angle))); return sendSet('SV_L', a); },
     setServoStepMm: (mm) => { beginEdit('SV_STP'); holdKey('SV_STP', 700); const v = Number(mm); if (!Number.isFinite(v)) return Promise.resolve(); const clamped = Math.max(0.05, Math.min(20.0, v)); return sendSet('SV_STP', clamped); },
     setServoHome: (side) => { beginEdit('SV_HOME'); holdKey('SV_HOME', 700); const s = String(side ?? '').trim().toUpperCase(); if (s !== 'R' && s !== 'L') return Promise.resolve(); return sendSet('SV_HOME', s); },
+    // Guide travel per servo degree (machine calibration)
+    setServoMmPerDeg: (v) => {
+      const n = Number(v);
+      if (!(n >= 0.1 && n <= 1.0)) return Promise.resolve();
+      holdKey('SV_MMD', 900);
+      state.servoMmPerDeg = Math.round(n * 10000) / 10000;
+      emit('state', { ...state });
+      return sendSet('SV_MMD', state.servoMmPerDeg);
+    },
+    setSpoolWidth: (mm) => {
+      const n = Number(mm);
+      if (!(n >= 0 && n <= 300)) return Promise.resolve();
+      holdKey('SV_W', 900);
+      state.spoolWidthMm = Math.round(n * 10) / 10;
+      emit('state', { ...state });
+      return sendSet('SV_W', state.spoolWidthMm);
+    },
+    // New end stops (and width) for a different spool; deselects the preset so it is not overwritten.
+    setSpoolEnds: (l, r, widthMm) => {
+      const L = Math.max(0, Math.min(180, Math.round(Number(l))));
+      const R = Math.max(0, Math.min(180, Math.round(Number(r))));
+      const W = Math.round(Math.max(0, Math.min(300, Number(widthMm) || 0)) * 10) / 10;
+      ['SV_L','SV_R','SV_W','SPOOL'].forEach(k => holdKey(k, 900));
+      state.servoAngleL = L; state.servoAngleR = R; state.spoolWidthMm = W; state.activeSpool = -1;
+      emit('state', { ...state });
+      return writePacket({ SET: { SPOOL: -1, SV_L: L, SV_R: R, SV_W: W } });
+    },
+    selectSpool: (i) => {
+      const idx = Number(i) | 0;
+      holdKey('SPOOL', 900);
+      state.activeSpool = idx;
+      const p = (state.spools || []).find(x => x.i === idx);
+      if (p) {
+        ['SV_L','SV_R','SV_W'].forEach(k => holdKey(k, 900));
+        state.servoAngleL = p.l; state.servoAngleR = p.r; state.spoolWidthMm = p.w;
+      }
+      emit('state', { ...state });
+      return sendSet('SPOOL', idx);
+    },
+    saveSpool: (name, index = -1) => writePacket({ SET: { SPOOL_SAVE: { I: Number(index) | 0, N: String(name || '').slice(0, 15) } } }),
+    deleteSpool: (i) => sendSet('SPOOL_DEL', Number(i) | 0),
+    requestSpools: () => sendCmd('GET_SPOOLS'),
     servoGoto: (target) => { const t = String(target ?? '').trim().toUpperCase(); if (t !== 'L' && t !== 'R' && t !== 'HOME') return Promise.resolve(); return sendSet('SV_GOTO', t); },
     setBoardVariant: (variant) => {
       beginEdit('VAR'); holdKey('VAR', 700);
