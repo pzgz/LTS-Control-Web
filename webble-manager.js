@@ -511,16 +511,6 @@
       emit('state', { ...state });
       return sendSet('SV_W', state.spoolWidthMm);
     },
-    // New end stops (and width) for a different spool; deselects the preset so it is not overwritten.
-    setSpoolEnds: (l, r, widthMm) => {
-      const L = Math.max(0, Math.min(180, Math.round(Number(l))));
-      const R = Math.max(0, Math.min(180, Math.round(Number(r))));
-      const W = Math.round(Math.max(0, Math.min(300, Number(widthMm) || 0)) * 10) / 10;
-      ['SV_L','SV_R','SV_W','SPOOL'].forEach(k => holdKey(k, 900));
-      state.servoAngleL = L; state.servoAngleR = R; state.spoolWidthMm = W; state.activeSpool = -1;
-      emit('state', { ...state });
-      return writePacket({ SET: { SPOOL: -1, SV_L: L, SV_R: R, SV_W: W } });
-    },
     selectSpool: (i) => {
       const idx = Number(i) | 0;
       holdKey('SPOOL', 900);
