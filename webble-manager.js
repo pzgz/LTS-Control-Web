@@ -41,6 +41,7 @@
     hasSpoolTools: false,
     servoMmPerDeg: null,
     spoolWidthMm: 0,
+    guideDwell: null,   // SV_DW: spool revolutions the guide stays at each end stop
     activeSpool: -1,
     spools: null,
 
@@ -391,6 +392,7 @@
           if (firstTime && state.spools == null) requestSpoolsSoon();
         }
         if (typeof d.SV_W === 'number' && !isEditing('SV_W') && !isHeld('SV_W')) state.spoolWidthMm = d.SV_W;
+        if (typeof d.SV_DW === 'number' && !isEditing('SV_DW') && !isHeld('SV_DW')) state.guideDwell = d.SV_DW;
         if (typeof d.SPOOL === 'number' && !isEditing('SPOOL') && !isHeld('SPOOL')) state.activeSpool = d.SPOOL|0;
         if (typeof d.SV_HOME === 'string' && !isEditing('SV_HOME') && !isHeld('SV_HOME')) {
           const h = d.SV_HOME.trim().toUpperCase();
@@ -510,6 +512,14 @@
       state.spoolWidthMm = Math.round(n * 10) / 10;
       emit('state', { ...state });
       return sendSet('SV_W', state.spoolWidthMm);
+    },
+    setGuideDwell: (revs) => {
+      const n = Number(revs);
+      if (!(n >= 0 && n <= 3)) return Promise.resolve();
+      holdKey('SV_DW', 900);
+      state.guideDwell = Math.round(n * 10) / 10;
+      emit('state', { ...state });
+      return sendSet('SV_DW', state.guideDwell);
     },
     selectSpool: (i) => {
       const idx = Number(i) | 0;

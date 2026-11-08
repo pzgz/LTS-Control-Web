@@ -165,7 +165,7 @@
       if (servoStepMinus) servoStepMinus.disabled = !on;
       if (servoStepPlus) servoStepPlus.disabled = !on;
       if (servoHomeSetting) servoHomeSetting.disabled = !on;
-      ['spoolSelect','spoolWidth','spoolName','spoolSaveBtn','spoolDelBtn','guideTravel','guideTravelBtn']
+      ['guideDwell','spoolSelect','spoolWidth','spoolName','spoolSaveBtn','spoolDelBtn','guideTravel','guideTravelBtn']
         .forEach(id => { const el = document.getElementById(id); if (el) el.disabled = !on; });
     }
 
@@ -392,6 +392,7 @@
     const spoolTools     = document.getElementById('spoolTools');
     const spoolSelect    = document.getElementById('spoolSelect');
     const spoolWidth     = document.getElementById('spoolWidth');
+    const guideDwell     = document.getElementById('guideDwell');
     const spoolName      = document.getElementById('spoolName');
     const spoolSaveBtn   = document.getElementById('spoolSaveBtn');
     const spoolDelBtn    = document.getElementById('spoolDelBtn');
@@ -451,6 +452,10 @@
       spoolTools.hidden = !st.hasSpoolTools;
       if (!st.hasSpoolTools) return;
       renderSpoolList(st);
+      if (guideDwell && document.activeElement !== guideDwell && !isUIEditing('SV_DW')) {
+        const d = Number(st.guideDwell);
+        guideDwell.value = Number.isFinite(d) && st.guideDwell != null ? d.toFixed(1) : '';
+      }
       if (spoolWidth && document.activeElement !== spoolWidth && !isUIEditing('SV_W')) {
         const w = Number(st.spoolWidthMm);
         spoolWidth.value = w > 0 ? String(w) : '';
@@ -485,6 +490,18 @@
         } finally { endUI('SV_W'); }
       });
       spoolWidth.addEventListener('blur', () => { if (isUIEditing('SV_W')) endUI('SV_W'); });
+    }
+
+    if (guideDwell) {
+      guideDwell.addEventListener('focusin', () => beginUI('SV_DW'));
+      guideDwell.addEventListener('change', () => {
+        const d = Number(guideDwell.value);
+        try {
+          if (!(d >= 0 && d <= 3)) { showSpoolMsg('Enter 0 to 3 turns (1.0 is the normal value).', true); return; }
+          runOrQueue('SV_DW', () => window.webble.setGuideDwell(d));
+        } finally { endUI('SV_DW'); }
+      });
+      guideDwell.addEventListener('blur', () => { if (isUIEditing('SV_DW')) endUI('SV_DW'); });
     }
 
     if (spoolName) spoolName.addEventListener('input', () => { spoolName.dataset.touched = '1'; });

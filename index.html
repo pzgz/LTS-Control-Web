@@ -236,6 +236,14 @@
               <!-- Spool tools: only shown when the board firmware supports them (SV_MMD in status) -->
               <div id="spoolTools" hidden>
                 <div class="form-grid" style="margin-top:8px;">
+                  <label for="guideDwell" class="form-label">End Dwell:</label>
+                  <div class="form-control spool-inline">
+                    <input id="guideDwell" class="spool-num" type="number" min="0" max="3" step="0.1" inputmode="decimal" placeholder="1.0">
+                    <span class="spool-unit" title="Spool turns the guide stays at each flange before turning back">turns</span>
+                  </div>
+                </div>
+
+                <div class="form-grid" style="margin-top:8px;">
                   <label for="spoolSelect" class="form-label">Spool Preset:</label>
                   <select id="spoolSelect" class="form-control spool-select">
                     <option value="-1">None</option>
